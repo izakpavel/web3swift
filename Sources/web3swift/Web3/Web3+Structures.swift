@@ -146,10 +146,16 @@ extension EthereumTransaction:Decodable {
         self.value = options.value!
         self.to = options.to!
         
+        self.isEIP1559 = false
+        
         if let gP = options.gasPrice {
             switch gP {
             case .manual(let value):
                 self.gasPrice = value
+            case .eip1559(let maxPriorityFee, let maxFee):
+                self.maxPriorityFeePerGas = maxPriorityFee
+                self.maxFeePerGas = maxFee
+                self.isEIP1559 = true
             default:
                 self.gasPrice = BigUInt("5000000000")
             }

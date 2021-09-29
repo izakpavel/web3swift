@@ -37,6 +37,7 @@ public struct TransactionOptions {
         case automatic
         case manual(BigUInt)
         case withMargin(Double)
+        case eip1559(maxPriorityFee: BigUInt, maxFee: BigUInt)
     }
     public var gasPrice: GasPricePolicy?
 
@@ -89,6 +90,8 @@ public struct TransactionOptions {
             return value
         case .withMargin(_):
             return suggestedByNode
+        case .eip1559(let maxPriorityFee, let maxFee):
+            return maxPriorityFee + maxFee
         }
     }
     
@@ -133,7 +136,11 @@ public struct TransactionOptions {
         }
         if let gasPrice = json["gasPrice"] as? String, let gasPriceBiguint = BigUInt(gasPrice.stripHexPrefix().lowercased(), radix: 16) {
             options.gasPrice = .manual(gasPriceBiguint)
-        } else {
+        } else if let maxFeePerGas = json["maxFeePerGas"] as? String, let maxFeePerGasBiguint = BigUInt(maxFeePerGas.stripHexPrefix().lowercased(), radix: 16),
+                  let maxPriorityFeePerGas = json["maxPriorityFeePerGas"] as? String, let maxPriorityFeePerGasBigUInt = BigUInt(maxPriorityFeePerGas.stripHexPrefix().lowercased(), radix: 16){
+            options.gasPrice = .eip1559(maxPriorityFee: maxPriorityFeePerGasBigUInt, maxFee: maxFeePerGasBiguint)
+        }
+        else {
             options.gasPrice = .automatic
         }
         if let value = json["value"] as? String, let valueBiguint = BigUInt(value.stripHexPrefix().lowercased(), radix: 16) {

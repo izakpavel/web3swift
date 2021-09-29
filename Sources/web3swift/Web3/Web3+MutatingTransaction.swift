@@ -114,6 +114,8 @@ public class WriteTransaction: ReadTransaction {
                 gasPricePromise = self.web3.eth.getGasPricePromise()
             case .manual(let gasPrice):
                 gasPricePromise = Promise<BigUInt>.value(gasPrice)
+            case .eip1559(let maxPriorityFee, let maxFee):
+                gasPricePromise = Promise<BigUInt>.value(maxPriorityFee+maxFee)
             }
             var promisesToFulfill: [Promise<BigUInt>] = [getNoncePromise!, gasPricePromise!, gasEstimatePromise!]
             when(resolved: getNoncePromise!, gasEstimatePromise!, gasPricePromise!).map(on: queue, { (results:[PromiseResult<BigUInt>]) throws -> EthereumTransaction in
@@ -140,7 +142,15 @@ public class WriteTransaction: ReadTransaction {
     
                 assembledTransaction.nonce = nonce
                 assembledTransaction.gasLimit = estimate
-                assembledTransaction.gasPrice = finalGasPrice
+                if case .eip1559(let maxPriorityFee, let maxFee) = gasPricePolicy {
+                    assembledTransaction.maxFeePerGas = maxFee
+                    assembledTransaction.maxPriorityFeePerGas = maxPriorityFee
+                    assembledTransaction.isEIP1559 = false
+                }
+                else {
+                    assembledTransaction.gasPrice = finalGasPrice
+                    assembledTransaction.isEIP1559 = false
+                }
                 
                 forAssemblyPipeline = (assembledTransaction, self.contract, mergedOptions)
                 

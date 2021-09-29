@@ -12,7 +12,13 @@ import BigInt
 
 public struct EthereumTransaction: CustomStringConvertible {
     public var nonce: BigUInt
-    public var gasPrice: BigUInt = BigUInt(0)
+    public var gasPrice: BigUInt = BigUInt(0) // legacy gas price
+    
+    // EIP1559 fields
+    public var isEIP1559: Bool
+    public var maxFeePerGas: BigUInt = BigUInt(0)
+    public var maxPriorityFeePerGas: BigUInt = BigUInt(0)
+    
     public var gasLimit: BigUInt = BigUInt(0)
     // The destination address of the message, left undefined for a contract-creation transaction.
     public var to: EthereumAddress
@@ -68,6 +74,18 @@ public struct EthereumTransaction: CustomStringConvertible {
         self.value = value
         self.data = data
         self.to = to
+        self.isEIP1559 = false
+    }
+    
+    public init(gasPrice: BigUInt, to: EthereumAddress, value: BigUInt, data: Data, maxPriorityFeePerGas: BigUInt, maxFeePerGas: BigUInt) {
+        self.nonce = BigUInt(0)
+        self.gasPrice = gasPrice
+        self.maxPriorityFeePerGas = maxPriorityFeePerGas
+        self.maxFeePerGas = maxFeePerGas
+        self.value = value
+        self.data = data
+        self.to = to
+        self.isEIP1559 = true
     }
     
     
@@ -81,6 +99,21 @@ public struct EthereumTransaction: CustomStringConvertible {
         self.v = v
         self.r = r
         self.s = s
+        self.isEIP1559 = false
+    }
+    
+    public init (nonce: BigUInt, gasPrice: BigUInt, to: EthereumAddress, value: BigUInt, data: Data, maxPriorityFeePerGas: BigUInt, maxFeePerGas: BigUInt, v: BigUInt, r: BigUInt, s: BigUInt) {
+        self.nonce = nonce
+        self.gasPrice = gasPrice
+        self.maxPriorityFeePerGas = maxPriorityFeePerGas
+        self.maxFeePerGas = maxFeePerGas
+        self.to = to
+        self.value = value
+        self.data = data
+        self.v = v
+        self.r = r
+        self.s = s
+        self.isEIP1559 = true
     }
     
     public var description: String {
@@ -88,7 +121,11 @@ public struct EthereumTransaction: CustomStringConvertible {
             var toReturn = ""
             toReturn = toReturn + "Transaction" + "\n"
             toReturn = toReturn + "Nonce: " + String(self.nonce) + "\n"
-            toReturn = toReturn + "Gas price: " + String(self.gasPrice) + "\n"
+            
+            toReturn = toReturn + "Gas price: " + String(gasPrice) + "\n"
+            toReturn = toReturn + "Max fee per gas: " + String(maxFeePerGas) + "\n"
+            toReturn = toReturn + "Max priority fee per gas: " + String(maxPriorityFeePerGas) + "\n"
+            
             toReturn = toReturn + "Gas limit: " + String(describing: self.gasLimit) + "\n"
             toReturn = toReturn + "To: " + self.to.address + "\n"
             toReturn = toReturn + "Value: " + String(self.value ?? "nil") + "\n"
@@ -166,19 +203,43 @@ public struct EthereumTransaction: CustomStringConvertible {
     public func encode(forSignature:Bool = false, chainID: BigUInt? = nil) -> Data? {
         if (forSignature) {
             if chainID != nil  {
-                let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
-                return RLP.encode(fields)
+                if self.isEIP1559 { //rlp('[nonce, gasLimit, to, value, data, gasPremium, feeCap, v, r, s]) - from https://infura.io/docs/ethereum#operation/eth_sendRawTransaction
+                    let fields = [self.nonce, self.gasLimit, self.to.addressData, self.value!, self.data, self.maxPriorityFeePerGas, self.maxFeePerGas, chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
+                    return RLP.encode(fields)
+                }
+                else { //rlp([nonce, gasPrice, gasLimit, to, value, data, v, r, s])
+                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
+                    return RLP.encode(fields)
+                }
             }
             else if self.chainID != nil  {
-                let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, self.chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
-                return RLP.encode(fields)
+                if self.isEIP1559 { //rlp('[nonce, gasLimit, to, value, data, gasPremium, feeCap, v, r, s]) - from https://infura.io/docs/ethereum#operation/eth_sendRawTransaction
+                    let fields = [self.nonce, self.gasLimit, self.to.addressData, self.value!, self.data, self.maxPriorityFeePerGas, self.maxFeePerGas, self.chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
+                    return RLP.encode(fields)
+                }
+                else {
+                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, self.chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
+                    return RLP.encode(fields)
+                }
             } else {
-                let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data] as [AnyObject]
-                return RLP.encode(fields)
+                if self.isEIP1559 {
+                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data] as [AnyObject]
+                    return RLP.encode(fields)
+                }
+                else {
+                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data] as [AnyObject]
+                    return RLP.encode(fields)
+                }
             }
         } else {
-            let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, self.v, self.r, self.s] as [AnyObject]
-            return RLP.encode(fields)
+            if self.isEIP1559 {
+                let fields = [self.nonce, self.gasLimit, self.to.addressData, self.value!, self.data, self.maxPriorityFeePerGas, self.maxFeePerGas, self.v, self.r, self.s] as [AnyObject]
+                return RLP.encode(fields)
+            }
+            else {
+                let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, self.v, self.r, self.s] as [AnyObject]
+                return RLP.encode(fields)
+            }
         }
     }
     
@@ -295,11 +356,16 @@ public extension EthereumTransaction {
         let defaults = TransactionOptions.defaultOptions
         let merged = defaults.merge(options)
         self.nonce = BigUInt(0)
+        self.isEIP1559 = false
         
         if let gP = merged.gasPrice {
             switch gP {
             case .manual(let value):
                 self.gasPrice = value
+            case .eip1559(let maxPriorityFee, let maxFee):
+                self.maxPriorityFeePerGas = maxPriorityFee
+                self.maxFeePerGas = maxFee
+                self.isEIP1559 = true
             default:
                 self.gasPrice = BigUInt("5000000000")
             }
