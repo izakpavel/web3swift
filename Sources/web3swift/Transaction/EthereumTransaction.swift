@@ -201,10 +201,14 @@ public struct EthereumTransaction: CustomStringConvertible {
     }
     
     public func encode(forSignature:Bool = false, chainID: BigUInt? = nil) -> Data? {
+        // EIP1559: 0x02 || rlp([chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, destination, amount, data, access_list, signature_y_parity, signature_r, signature_s])
+        
+        let access_list = [AnyObject]()
+        
         if (forSignature) {
             if chainID != nil  {
-                if self.isEIP1559 { //rlp('[nonce, gasLimit, to, value, data, gasPremium, feeCap, v, r, s]) - from https://infura.io/docs/ethereum#operation/eth_sendRawTransaction
-                    let fields = [self.nonce, self.gasLimit, self.to.addressData, self.value!, self.data, self.maxPriorityFeePerGas, self.maxFeePerGas, chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
+                if self.isEIP1559 {
+                    let fields = [chainID!, self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list, chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
                     return RLP.encode(fields)
                 }
                 else { //rlp([nonce, gasPrice, gasLimit, to, value, data, v, r, s])
@@ -213,8 +217,8 @@ public struct EthereumTransaction: CustomStringConvertible {
                 }
             }
             else if self.chainID != nil  {
-                if self.isEIP1559 { //rlp('[nonce, gasLimit, to, value, data, gasPremium, feeCap, v, r, s]) - from https://infura.io/docs/ethereum#operation/eth_sendRawTransaction
-                    let fields = [self.nonce, self.gasLimit, self.to.addressData, self.value!, self.data, self.maxPriorityFeePerGas, self.maxFeePerGas, self.chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
+                if self.isEIP1559 {
+                    let fields = [self.chainID!, self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list, self.chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
                     return RLP.encode(fields)
                 }
                 else {
@@ -223,7 +227,8 @@ public struct EthereumTransaction: CustomStringConvertible {
                 }
             } else {
                 if self.isEIP1559 {
-                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data] as [AnyObject]
+                    print("WARNING EIP1559 should always contain chainId!!!")
+                    let fields = [BigUInt(1), self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list] as [AnyObject]
                     return RLP.encode(fields)
                 }
                 else {
@@ -233,7 +238,8 @@ public struct EthereumTransaction: CustomStringConvertible {
             }
         } else {
             if self.isEIP1559 {
-                let fields = [self.nonce, self.gasLimit, self.to.addressData, self.value!, self.data, self.maxPriorityFeePerGas, self.maxFeePerGas, self.v, self.r, self.s] as [AnyObject]
+                let adjustedV = self.v - BigUInt(35) - 2*self.chainID!
+                let fields = [self.chainID!, self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list, adjustedV, self.r, self.s] as [AnyObject]
                 return RLP.encode(fields)
             }
             else {
@@ -340,7 +346,13 @@ public struct EthereumTransaction: CustomStringConvertible {
     static func createRawTransaction(transaction: EthereumTransaction) -> JSONRPCrequest? {
         guard transaction.sender != nil else {return nil}
         guard let encodedData = transaction.encode() else {return nil}
-        let hex = encodedData.toHexString().addHexPrefix().lowercased()
+        var hex = ""
+        if transaction.isEIP1559 {
+            hex = "0x02"+encodedData.toHexString().lowercased()
+        }
+        else {
+            hex = encodedData.toHexString().addHexPrefix().lowercased()
+        }
         var request = JSONRPCrequest()
         request.method = JSONRPCmethod.sendRawTransaction
         let params = [hex] as Array<Encodable>
