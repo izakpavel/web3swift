@@ -201,51 +201,34 @@ public struct EthereumTransaction: CustomStringConvertible {
     }
     
     public func encode(forSignature:Bool = false, chainID: BigUInt? = nil) -> Data? {
+        
         // EIP1559: 0x02 || rlp([chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, destination, amount, data, access_list, signature_y_parity, signature_r, signature_s])
         
         let access_list = [AnyObject]()
         
-        if (forSignature) {
-            if chainID != nil  {
-                if self.isEIP1559 {
-                    let fields = [chainID!, self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list, chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
-                    return RLP.encode(fields)
-                }
-                else { //rlp([nonce, gasPrice, gasLimit, to, value, data, v, r, s])
-                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
-                    return RLP.encode(fields)
-                }
+        if self.isEIP1559 {
+            guard let chainId = (chainID ?? self.chainID) else {
+                print("ERROR: EIP1559 should always contain chainId!")
+                return nil
             }
-            else if self.chainID != nil  {
-                if self.isEIP1559 {
-                    let fields = [self.chainID!, self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list, self.chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
-                    return RLP.encode(fields)
-                }
-                else {
-                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, self.chainID!, BigUInt(0), BigUInt(0)] as [AnyObject]
-                    return RLP.encode(fields)
-                }
-            } else {
-                if self.isEIP1559 {
-                    print("WARNING EIP1559 should always contain chainId!!!")
-                    let fields = [BigUInt(1), self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list] as [AnyObject]
-                    return RLP.encode(fields)
-                }
-                else {
-                    let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data] as [AnyObject]
-                    return RLP.encode(fields)
-                }
-            }
-        } else {
-            if self.isEIP1559 {
+            let eip1559prefixData = Data(hex: "0x02")
+            var fields = [chainId, self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list] as [AnyObject]
+            if !forSignature {
                 let adjustedV = self.v - BigUInt(35) - 2*self.chainID!
-                let fields = [self.chainID!, self.nonce, self.maxPriorityFeePerGas, self.maxFeePerGas, self.gasLimit, self.to.addressData, self.value!, self.data, access_list, adjustedV, self.r, self.s] as [AnyObject]
-                return RLP.encode(fields)
+                fields.append(contentsOf: [adjustedV, self.r, self.s] as [AnyObject])
             }
-            else {
-                let fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data, self.v, self.r, self.s] as [AnyObject]
-                return RLP.encode(fields)
+            guard let encoded = RLP.encode(fields) else { return nil }
+            return eip1559prefixData + encoded
+        }
+        else { // legacy code
+            var fields = [self.nonce, self.gasPrice, self.gasLimit, self.to.addressData, self.value!, self.data] as [AnyObject]
+            if let chainId = (chainID ?? self.chainID), forSignature {
+                fields.append(contentsOf: [chainId, BigUInt(0), BigUInt(0)] as [AnyObject])
             }
+            else if (!forSignature){
+                fields.append(contentsOf: [self.v, self.r, self.s] as [AnyObject])
+            }
+            return RLP.encode(fields)
         }
     }
     
@@ -346,13 +329,8 @@ public struct EthereumTransaction: CustomStringConvertible {
     static func createRawTransaction(transaction: EthereumTransaction) -> JSONRPCrequest? {
         guard transaction.sender != nil else {return nil}
         guard let encodedData = transaction.encode() else {return nil}
-        var hex = ""
-        if transaction.isEIP1559 {
-            hex = "0x02"+encodedData.toHexString().lowercased()
-        }
-        else {
-            hex = encodedData.toHexString().addHexPrefix().lowercased()
-        }
+        let hex = encodedData.toHexString().addHexPrefix().lowercased()
+        
         var request = JSONRPCrequest()
         request.method = JSONRPCmethod.sendRawTransaction
         let params = [hex] as Array<Encodable>
